@@ -1,12 +1,11 @@
 use windows::Win32::Foundation::{HWND, RECT, POINT};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowThreadProcessId, GetWindowRect,
-    ShowWindow, SetForegroundWindow, BringWindowToTop, IsWindowVisible, IsIconic,
+    ShowWindow, SetForegroundWindow, IsWindowVisible, IsIconic,
     SW_RESTORE, SW_SHOWNA, GetGUIThreadInfo, GUITHREADINFO,
     SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SWP_NOACTIVATE,
     MessageBoxW, MB_ICONERROR, MB_OK
 };
-use windows::Win32::System::Threading::AttachThreadInput;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::System::Ole::{SafeArrayAccessData, SafeArrayUnaccessData, SafeArrayDestroy};
 use windows::Win32::UI::Accessibility::{IUIAutomation, CUIAutomation, IUIAutomationTextPattern, UIA_PATTERN_ID};
@@ -156,7 +155,7 @@ impl WindowExt {
         }
     }
 
-    /// 强力恢复窗口焦点（处理跨线程输入附加）
+    /// Restore focus without sharing an input queue with another application.
     pub fn force_focus_window(hwnd: HWND) {
         if hwnd.0.is_null() { return; }
         
@@ -164,27 +163,10 @@ impl WindowExt {
             if !IsWindowVisible(hwnd).as_bool() { return; }
             let should_restore = IsIconic(hwnd).as_bool();
 
-            let fg_hwnd = GetForegroundWindow();
-            if fg_hwnd != hwnd {
-                let fg_thread_id = GetWindowThreadProcessId(fg_hwnd, None);
-                let target_thread_id = GetWindowThreadProcessId(hwnd, None);
-
-                if fg_thread_id != 0 && target_thread_id != 0 && fg_thread_id != target_thread_id {
-                    let _ = AttachThreadInput(fg_thread_id, target_thread_id, true);
-                    let _ = SetForegroundWindow(hwnd);
-                    if should_restore {
-                        let _ = ShowWindow(hwnd, SW_RESTORE);
-                    }
-                    let _ = BringWindowToTop(hwnd);
-                    let _ = AttachThreadInput(fg_thread_id, target_thread_id, false);
-                } else {
-                    let _ = SetForegroundWindow(hwnd);
-                    if should_restore {
-                        let _ = ShowWindow(hwnd, SW_RESTORE);
-                    }
-                    let _ = BringWindowToTop(hwnd);
-                }
+            if should_restore {
+                let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindowAsync(hwnd, SW_RESTORE);
             }
+            let _ = SetForegroundWindow(hwnd);
         }
     }
 

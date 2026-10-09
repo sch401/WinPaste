@@ -162,6 +162,7 @@ const ClipboardItem = ({
     const richSnapshotImgRef = useRef<HTMLImageElement | null>(null);
     const richSnapshotFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hoverRequestRef = useRef(0);
     const hoverAnchorRef = useRef<CompactPreviewAnchor | null>(null);
 
     const richTextFallback = item.content_type === "rich_text" && item.html_content ? (() => { const { cleanHtml, imagePayload } = extractRichImageFallback(item.html_content); return { cleanHtml: cleanHtml || item.html_content, imageSrc: resolveRichImageSrc(imagePayload) }; })() : null;
@@ -208,6 +209,8 @@ const ClipboardItem = ({
     const previewOwner = String(item.id);
 
     const showCompactPreview = async (anchor: CompactPreviewAnchor) => {
+        const request = ++hoverRequestRef.current;
+        const revision = compactPreviewController.revision;
         if (item.is_external && item.file_preview_exists === false) return;
         if (isSensitiveHidden) {
             // 隐私保护开启且条目未解锁时,不要把内容(文本/图片/富文本)送到预览窗,
@@ -246,6 +249,7 @@ const ClipboardItem = ({
             } else if (!content) {
                 content = await invoke<string>("get_clipboard_content", { id: item.id }).catch(() => "");
             }
+            if (request !== hoverRequestRef.current || !hoverAnchorRef.current || revision !== compactPreviewController.revision) return;
             await compactPreviewController.show(anchor, {
                 contentType: item.content_type,
                 content,
@@ -275,8 +279,8 @@ const ClipboardItem = ({
     }, [useSnapshotPreviewImage, effectiveRichTextSnapshotSrc, item.id]);
 
     useEffect(() => { if (isEditingTags && tagInputRef.current) tagInputRef.current.focus(); }, [isEditingTags]);
-    useEffect(() => { if (!canShowCompactPreview) void compactPreviewController.hide(previewOwner); }, [canShowCompactPreview, previewOwner]);
-    useEffect(() => { return () => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); }; }, [previewOwner]);
+    useEffect(() => { if (!canShowCompactPreview) { hoverRequestRef.current++; if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); } }, [canShowCompactPreview, previewOwner]);
+    useEffect(() => { return () => { hoverRequestRef.current++; if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); }; }, [previewOwner]);
 
     useEffect(() => {
         if (!item.is_external || item.file_preview_exists === false || !onExternalMissing) return;
@@ -381,8 +385,8 @@ const ClipboardItem = ({
                     e.preventDefault();
                 }
             }}
-            onClick={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea')) return; if (item.is_external && item.file_preview_exists === false) { onSelect(); onOpen(e); return; } void compactPreviewController.hide(previewOwner); onCopy(false); onSelect(); }}
-            onContextMenu={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea')) return; if (item.is_external && item.file_preview_exists === false) { onSelect(); onOpen(e); return; } void compactPreviewController.hide(previewOwner); e.preventDefault(); onCopy(true); onSelect(); }}
+            onClick={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea')) return; if (item.is_external && item.file_preview_exists === false) { onSelect(); onOpen(e); return; } hoverRequestRef.current++; if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); onCopy(false); onSelect(); }}
+            onContextMenu={(e) => { if ((e.target as HTMLElement).closest('button, input, textarea')) return; if (item.is_external && item.file_preview_exists === false) { onSelect(); onOpen(e); return; } hoverRequestRef.current++; if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); e.preventDefault(); onCopy(true); onSelect(); }}
             onMouseEnter={(e) => {
                 if (!canShowCompactPreview) return;
                 const rect = itemRef.current?.getBoundingClientRect();
@@ -409,7 +413,7 @@ const ClipboardItem = ({
                     itemRect: prev?.itemRect || { left: e.clientX, top: e.clientY, width: 0, height: 0 }
                 };
             }}
-            onMouseLeave={() => { if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); }}
+            onMouseLeave={() => { hoverRequestRef.current++; if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current); hoverAnchorRef.current = null; void compactPreviewController.hide(previewOwner); }}
         >
             <div className="item-header">
                 <div className="item-app-info">

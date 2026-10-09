@@ -65,7 +65,6 @@ pub fn raise_window_topmost(app: AppHandle, label: String) -> AppResult<()> {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
             SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            SWP_SHOWWINDOW,
         };
 
         let window = app
@@ -77,7 +76,7 @@ pub fn raise_window_topmost(app: AppHandle, label: String) -> AppResult<()> {
             // HWND_NOTOPMOST → HWND_TOPMOST 是 Windows 上"重新置顶但不激活"的经典做法:
             // 只调一次 HWND_TOPMOST 时,若窗口已在 topmost 带内,并不会重新排到带顶。
             let _ = SetWindowPos(hwnd, Some(HWND_NOTOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
         Ok(())
     }

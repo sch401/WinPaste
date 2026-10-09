@@ -403,6 +403,9 @@ pub fn destroy_main_window(app: &AppHandle) {
 
 /// Hide the main window; in lightweight mode destroy it instead so the webview is released.
 pub fn hide_main_window_or_destroy(app: &AppHandle, restore_focus: bool) {
+    if let Some(preview) = app.get_webview_window("compact-preview") {
+        let _ = preview.hide();
+    }
     let lightweight = app.state::<SettingsState>().lightweight_mode.load(Ordering::Relaxed);
     if lightweight {
         destroy_main_window(app);

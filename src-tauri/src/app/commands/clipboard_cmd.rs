@@ -44,10 +44,10 @@ pub fn toggle_clipboard_pin(
         }
     }
     
+    let data_dir = app_data_dir.0.lock().unwrap().clone();
     let conn = state.conn.lock().unwrap();
 
     if let Some(entry) = entry_to_save {
-        let data_dir = app_data_dir.0.lock().unwrap().clone();
         if let Ok(new_id) = state.repo.save_with_conn(&conn, &entry, Some(&data_dir)) {
              real_id = new_id;
              if let Ok(deleted_ids) = state.repo.enforce_limit_with_conn(&conn, Some(&data_dir)) {
@@ -73,17 +73,20 @@ pub fn toggle_clipboard_pin(
 #[tauri::command]
 pub fn update_tags(app_handle: AppHandle, state: State<'_, DbState>, session: State<'_, SessionHistory>, app_data_dir: State<'_, AppDataDir>, id: i64, tags: Vec<String>) -> AppResult<i64> {
     if id < 0 {
-        let mut session_items = session.inner().0.lock().unwrap();
-        if let Some(index) = session_items.iter().position(|item| item.id == id) {
-             let mut item = session_items[index].clone();
-             item.tags = tags.clone();
-             
-             let data_dir = app_data_dir.0.lock().unwrap().clone();
-             let new_id = state.repo.save(&item, Some(&data_dir))?;
-             
-             session_items[index].id = new_id;
-             session_items[index].tags = tags;
-             return Ok(new_id);
+        let item = {
+            let session_items = session.inner().0.lock().unwrap();
+            session_items.iter().find(|item| item.id == id).cloned()
+        };
+        if let Some(mut item) = item {
+            item.tags = tags.clone();
+            let data_dir = app_data_dir.0.lock().unwrap().clone();
+            let new_id = state.repo.save(&item, Some(&data_dir))?;
+            let mut session_items = session.inner().0.lock().unwrap();
+            if let Some(item) = session_items.iter_mut().find(|item| item.id == id) {
+                item.id = new_id;
+                item.tags = tags;
+            }
+            return Ok(new_id);
         }
         return Err(AppError::Validation("Item not found".to_string()));
     }

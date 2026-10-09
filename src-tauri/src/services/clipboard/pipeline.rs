@@ -312,6 +312,7 @@ impl PipelineStage for ValidationStage {
                 }
             }
             
+            drop(conn); // Release the database before acquiring session history.
             // Session history cleanup
             let session_history = ctx.app_handle.state::<SessionHistory>();
             let mut removed_ids = Vec::new();

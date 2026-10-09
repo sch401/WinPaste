@@ -1,4 +1,4 @@
-use tauri::{Emitter, State};
+use tauri::{AppHandle, Manager, Emitter, State};
 use crate::app_state::{SessionHistory, AppDataDir};
 use crate::database::DbState;
 use crate::infrastructure::repository::clipboard_repo::ClipboardRepository;
@@ -381,7 +381,7 @@ pub fn delete_clipboard_entry(
     invalidate_hover_preview(id);
 
     if id > 0 {
-        let data_dir = app_data.0.lock().unwrap();
+        let data_dir = app_data.0.lock().unwrap().clone();
         state.repo.delete(id, Some(&data_dir))?;
     }
     Ok(())
@@ -398,7 +398,7 @@ pub fn clear_clipboard_history(
         session_items.retain(|item| item.is_pinned || !item.tags.is_empty());
     }
     clear_hover_preview_cache();
-    let data_dir = app_data.0.lock().unwrap();
+    let data_dir = app_data.0.lock().unwrap().clone();
     state.repo.clear(Some(&data_dir)).map_err(AppError::from)
 }
 
@@ -540,7 +540,7 @@ pub fn delete_tag_from_all(
         session_items.retain(|item| !item.tags.contains(&tag_name));
     }
     
-    let data_dir = app_data.0.lock().unwrap();
+    let data_dir = app_data.0.lock().unwrap().clone();
     state.tag_repo.delete_globally(&tag_name, Some(&data_dir)).map_err(AppError::from)
 }
 
@@ -550,37 +550,37 @@ pub fn create_new_tag(state: State<'_, DbState>, tag_name: String) -> AppResult<
 }
 
 #[tauri::command]
-pub fn get_clipboard_content(
-    state: State<'_, DbState>,
-    session: State<'_, SessionHistory>,
-    id: i64,
-) -> AppResult<String> {
-    {
-        let session_items = session.inner().0.lock().unwrap();
-        if let Some(item) = session_items.iter().find(|i| i.id == id) {
-            if item.content_type == "rich_text" {
-                let normalized = derive_rich_text_content(&item.content, item.html_content.as_deref());
+pub async fn get_clipboard_content(app: AppHandle, id: i64) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DbState>();
+        let session = app.state::<SessionHistory>();
+        {
+            let session_items = session.inner().0.lock().unwrap();
+            if let Some(item) = session_items.iter().find(|i| i.id == id) {
+                if item.content_type == "rich_text" {
+                    let normalized = derive_rich_text_content(&item.content, item.html_content.as_deref());
+                    if !normalized.trim().is_empty() {
+                        return Ok(normalized);
+                    }
+                }
+                return Ok(item.content.clone());
+            }
+        }
+
+        if let Some((content, content_type, html_content)) =
+            state.repo.get_entry_content_with_html(id).map_err(AppError::from)?
+        {
+            if content_type == "rich_text" {
+                let normalized = derive_rich_text_content(&content, html_content.as_deref());
                 if !normalized.trim().is_empty() {
                     return Ok(normalized);
                 }
             }
-            return Ok(item.content.clone());
+            return Ok(content);
         }
-    }
 
-    if let Some((content, content_type, html_content)) =
-        state.repo.get_entry_content_with_html(id).map_err(AppError::from)?
-    {
-        if content_type == "rich_text" {
-            let normalized = derive_rich_text_content(&content, html_content.as_deref());
-            if !normalized.trim().is_empty() {
-                return Ok(normalized);
-            }
-        }
-        return Ok(content);
-    }
-
-    Err(AppError::Validation("Entry not found".to_string()))
+        Err(AppError::Validation("Entry not found".to_string()))
+    }).await.map_err(|e| AppError::Internal(e.to_string()))?
 }
 
 /// Resized hover-preview image for an image entry (`data:` payload or a local

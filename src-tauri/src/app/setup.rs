@@ -1053,8 +1053,7 @@ pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 return;
             }
             api.prevent_close();
-            let _ = window.hide();
-            let _ = window.app_handle().emit("window-hidden", ());
+            crate::app::window_manager::hide_main_window_or_destroy(window.app_handle(), false);
             NAVIGATION_ENABLED.store(false, Ordering::SeqCst);
             NAVIGATION_MODE_ACTIVE.store(false, Ordering::SeqCst);
         }

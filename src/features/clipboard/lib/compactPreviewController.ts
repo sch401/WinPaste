@@ -175,6 +175,8 @@ class CompactPreviewController {
     private readyWaiters = new Map<number, { resolve: (size: { width: number; height: number } | null) => void }>();
     private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
 
+    get revision() { return this.generation; }
+
     private setIgnoreBlur(ignore: boolean) {
         if (this.ignoreBlurActive === ignore) return;
         this.ignoreBlurActive = ignore;
@@ -241,6 +243,7 @@ class CompactPreviewController {
     private async ensureLifecycleListeners(): Promise<void> {
         if (this.listenersReady) return this.listenersReady;
         this.listenersReady = (async () => {
+            await listen("window-hidden", () => { void this.hide(); });
             await Promise.all(
                 LIFE_CYCLE_EVENTS.map(async (eventName) => {
                     try {
@@ -480,6 +483,7 @@ class CompactPreviewController {
         };
         const target = computePreviewPlacement(anchorRect, size, area, gap, margin);
 
+        if (!await appWindow.isVisible() || generation !== this.generation || !this.pending) return;
         this.setIgnoreBlur(true);
         try {
             await previewWindow.setPosition(new PhysicalPosition(target.x, target.y));
@@ -488,8 +492,16 @@ class CompactPreviewController {
                 return;
             }
             await previewWindow.show();
+            if (!await appWindow.isVisible() || generation !== this.generation || !this.pending) {
+                if (!this.pending || !await appWindow.isVisible()) await previewWindow.hide();
+                return;
+            }
             try { await previewWindow.setSize(new PhysicalSize(size.width, size.height)); } catch {}
             // 关键:每次显示后无条件抬升,否则会被主面板(每次显示都抢先置顶)压住
+            if (generation !== this.generation || !this.pending) {
+                if (!this.pending) await previewWindow.hide();
+                return;
+            }
             await raisePreviewWindowTopmost();
         } catch (err) {
             this.setIgnoreBlur(false);
@@ -647,7 +659,7 @@ class CompactPreviewController {
         this.readyWaiters.clear();
         this.setIgnoreBlur(false);
 
-        const previewWindow = this.window;
+        const previewWindow = this.window ?? await WebviewWindow.getByLabel(PREVIEW_WINDOW_LABEL).catch(() => null);
         if (!previewWindow) return;
         try {
             await previewWindow.hide();

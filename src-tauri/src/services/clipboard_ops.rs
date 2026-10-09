@@ -23,8 +23,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, IsWindowVisible, IsIconic,
-    SetForegroundWindow,
+    GetForegroundWindow, GetWindowThreadProcessId, IsWindowVisible,
 };
 
 const RICH_IMAGE_FALLBACK_PREFIX: &str = "<!--WINPASTE_RICH_IMAGE:";
@@ -263,6 +262,8 @@ pub async fn copy_to_clipboard(
 }
 
 async fn handle_window_focus_for_paste(app_handle: &tauri::AppHandle) -> AppResult<()> {
+    if let Some(preview) = app_handle.get_webview_window("compact-preview") { let _ = preview.hide(); }
+    let _ = app_handle.emit("window-hidden", ());
     let was_focused = crate::IS_MAIN_WINDOW_FOCUSED.load(Ordering::Relaxed);
 
     // 1. 先把自己变成不会抢夺焦点的幽灵状态（或直接隐藏）
@@ -298,7 +299,7 @@ async fn handle_window_focus_for_paste(app_handle: &tauri::AppHandle) -> AppResu
 
     // 2. 然后，如果之前我们拥有焦点，再郑重其事地把焦点交还给那个精准快照保存的目标窗口
     if was_focused {
-        let _ = restore_focus_before_paste(app_handle).await;
+        restore_focus_before_paste(app_handle).await?;
     }
 
     Ok(())
@@ -344,34 +345,7 @@ async fn restore_focus_before_paste(_app_handle: &tauri::AppHandle) -> AppResult
                 keybd_event(windows::Win32::UI::Input::KeyboardAndMouse::VK_MENU.0 as u8, 0, windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(0), 0);
                 keybd_event(windows::Win32::UI::Input::KeyboardAndMouse::VK_MENU.0 as u8, 0, KEYEVENTF_KEYUP, 0);
 
-                // 2. 将当前 Tokio 后台工作线程与前台线程进行输入附加，赋予当前线程前台特权
-                let current_thread_id = windows::Win32::System::Threading::GetCurrentThreadId();
-                let fg_thread_id = GetWindowThreadProcessId(fg_hwnd, None);
-                let target_thread_id = GetWindowThreadProcessId(target_hwnd, None);
-
-                let attached_to_fg = if current_thread_id != fg_thread_id && fg_thread_id != 0 {
-                    windows::Win32::System::Threading::AttachThreadInput(current_thread_id, fg_thread_id, true).as_bool()
-                } else { false };
-
-                let attached_to_target = if fg_thread_id != target_thread_id && target_thread_id != 0 {
-                    windows::Win32::System::Threading::AttachThreadInput(fg_thread_id, target_thread_id, true).as_bool()
-                } else { false };
-
-                let _ = SetForegroundWindow(target_hwnd);
-                
-                if IsIconic(target_hwnd).as_bool() {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::ShowWindow(target_hwnd, windows::Win32::UI::WindowsAndMessaging::SW_RESTORE);
-                }
-                let _ = windows::Win32::UI::WindowsAndMessaging::BringWindowToTop(target_hwnd);
-                
-                if attached_to_target {
-                    let _ = windows::Win32::System::Threading::AttachThreadInput(fg_thread_id, target_thread_id, false);
-                }
-                if attached_to_fg {
-                    let _ = windows::Win32::System::Threading::AttachThreadInput(current_thread_id, fg_thread_id, false);
-                }
-                
-                crate::info!("[DEBUG] Tried to set foreground. Attached to FG: {}, Attached to Target: {}", attached_to_fg, attached_to_target);
+                WindowExt::force_focus_window(target_hwnd);
             } else {
                 crate::info!("[DEBUG] Target window is already the foreground window.");
             }
@@ -384,6 +358,7 @@ async fn restore_focus_before_paste(_app_handle: &tauri::AppHandle) -> AppResult
                 let current_fg = GetForegroundWindow();
                 crate::info!("[WARN] Failed to confirm focus on target window after 300ms. Current Foreground is actually {:?}", current_fg.0 as usize);
             }
+            return Err(AppError::Internal("Paste target did not regain focus within 300ms".to_string()));
         } else {
             crate::info!("[DEBUG] Successfully confirmed target window is foreground!");
         }
@@ -788,7 +763,7 @@ async fn perform_paste_action(
 
     if stole_focus {
         crate::info!("[WARN] Clipboard window STOLE focus back, attempting one last restore...");
-        let _ = restore_focus_before_paste(app_handle).await;
+        restore_focus_before_paste(app_handle).await?;
 
         // 二次确认：如果焦点仍在自己窗口上（目标窗口全部失效时会发生），
         // 绝不把 Ctrl+V 发给自己 —— 那会粘贴进面板的搜索框。此时剪贴板
@@ -1178,7 +1153,7 @@ fn handle_post_paste_actions(
     if delete_after_use {
         // Cleanup file if needed
         let app_data = app_handle.state::<crate::app_state::AppDataDir>();
-        let data_dir = app_data.0.lock().unwrap();
+        let data_dir = app_data.0.lock().unwrap().clone();
         
         if state.repo.delete(id, Some(&data_dir)).is_ok() {
             let _ = app_handle.emit("clipboard-removed", id);
